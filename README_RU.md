@@ -63,14 +63,14 @@
 Если вы хотите выполнить калибровку программно:
 
 ```python
-from sensor_pack_2.geosensmod import HardIronCalibrator
+from sensor_pack_2.geosensmod import HardIronCalibrator, AXIS_ALL
 
 # Создание калибратора
 calibrator = HardIronCalibrator()
 
 # Сбор данных (в цикле, вращая датчик)
 for i in range(100):
- data = sensor.get_measurement_value(-1)  # MagnetometerData
+ data = sensor.get_measurement_value(AXIS_ALL)  # MagnetometerData
  if data:
      calibrator.update(data)
  time.sleep_ms(10)
@@ -93,7 +93,7 @@ calibrated_data = calibrator.apply(raw_data)
 
 ```python
 import json
-from sensor_pack_2.geosensmod import HardIronCalibrator
+from sensor_pack_2.geosensmod import HardIronCalibrator, AXIS_ALL
 
 # 1. ЗАГРУЗКА калибровки при старте программы
 clbr = HardIronCalibrator()
@@ -111,7 +111,7 @@ except OSError:
     print("Файл калибровки не найден. Будут использованы нулевые смещения.")
 
 # ... далее в основном цикле измерений ...
-raw_data = sensor.get_measurement_value(-1)
+raw_data = sensor.get_measurement_value(AXIS_ALL)
 
 # 2. ПРИМЕНЕНИЕ калибровки к сырым данным (единый метод для всех случаев)
 cal_data = clbr.apply(raw_data) 
