@@ -82,31 +82,47 @@ print(f"Offsets: X={offsets[0]}, Y={offsets[1]}, Z={offsets[2]}")
 # Применение калибровки
 calibrated_data = calibrator.apply(raw_data)
 ```
-## Сохранение калибровки
-После успешной калибровки сохраните смещения в энергонезависимую память, чтобы не выполнять калибровку при каждом запуске:
-Пример сохранения в файл:
+
+## Сохранение и загрузка калибровки
+
+После успешной калибровки **сохраните вычисленные смещения** в энергонезависимую память (например, в файл `calibration.json` на flash-памяти микроконтроллера). Это позволит избежать необходимости вращать датчик при каждом включении устройства.
+
+Весь цикл работы с калибровкой (загрузка, применение и сохранение) осуществляется централизованно через объект `HardIronCalibrator`.
+
+### Пример сохранения и загрузки из файла:
+
 ```python
 import json
+from sensor_pack_2.geosensmod import HardIronCalibrator
 
-# Сохранение
+# 1. ЗАГРУЗКА калибровки при старте программы
+clbr = HardIronCalibrator()
+try:
+    with open('calibration.json', 'r') as f:
+        data = json.load(f)
+    
+    # Восстанавливаем сохраненные смещения
+    clbr.offset_x = data['x']
+    clbr.offset_y = data['y']
+    clbr.offset_z = data['z']
+    clbr._is_calibrated = True  # Явно активируем режим применения калибровки
+    print("Калибровка успешно загружена из файла.")
+except OSError:
+    print("Файл калибровки не найден. Будут использованы нулевые смещения.")
+
+# ... далее в основном цикле измерений ...
+raw_data = sensor.get_measurement_value(-1)
+
+# 2. ПРИМЕНЕНИЕ калибровки к сырым данным (единый метод для всех случаев)
+cal_data = clbr.apply(raw_data) 
+
+# ... если была запущена процедура новой калибровки (вращение датчика) ...
+# 3. СОХРАНЕНИЕ новых смещений в файл
 offsets = {
-    'x': calibrator.offset_x,
-    'y': calibrator.offset_y,
-    'z': calibrator.offset_z
+    'x': clbr.offset_x,
+    'y': clbr.offset_y,
+    'z': clbr.offset_z
 }
-
 with open('calibration.json', 'w') as f:
     json.dump(offsets, f)
-
-# Загрузка
-with open('calibration.json', 'r') as f:
-    offsets = json.load(f)
-    
-sensor.set_calibration_offsets(
-    offsets['x'], 
-    offsets['y'], 
-    offsets['z']
-)
-
 ```
-
