@@ -1,4 +1,5 @@
-MicroPython module for control QMC5883L Geomagnetic Sensor.
+# MicroPython module for control QMC5883L Geomagnetic Sensor.
+## [На русском](README_RU.md)
 
 # I2C bus
 Just connect (VCC, GND, SDA, SCL) from your QMC5883L board to Arduino, ESP or any other board with MicroPython firmware.
