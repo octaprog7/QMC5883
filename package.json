@@ -1,0 +1,31 @@
+{
+  "name": "qmc5883",
+  "version": "1.0.1",
+  "description": "MicroPython driver for QMC5883L geomagnetic sensor with Hard Iron calibration support.",
+  "license": "MIT",
+  "author": "octaprog7",
+  "homepage": "https://github.com/octaprog7/QMC5883",
+  "urls": [
+    [
+      "qmc5883mod.py",
+      "github:octaprog7/QMC5883@v1.0.1/qmc5883mod.py"
+    ],
+    [
+      "sensor_pack_2/__init__.py",
+      "github:octaprog7/QMC5883@v1.0.1/sensor_pack_2/__init__.py"
+    ],
+    [
+      "sensor_pack_2/base_sensor.py",
+      "github:octaprog7/QMC5883@v1.0.1/sensor_pack_2/base_sensor.py"
+    ],
+    [
+      "sensor_pack_2/bus_service.py",
+      "github:octaprog7/QMC5883@v1.0.1/sensor_pack_2/bus_service.py"
+    ],
+    [
+      "sensor_pack_2/geosensmod.py",
+      "github:octaprog7/QMC5883@v1.0.1/sensor_pack_2/geosensmod.py"
+    ]
+  ],
+  "deps": []
+}
