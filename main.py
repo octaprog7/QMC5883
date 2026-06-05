@@ -122,6 +122,10 @@ def show_mode(sen: QMC5883L):
         status = sen.get_data_status(raw=False)
         drdy_str = "Ready" if status.DRDY else "Waiting"
         ovl_str = "YES (Error)" if status.OVL else "No"
+        # Если DOR в Истина, это значит: ты пропустил одно или несколько измерений, старые данные потеряны (Lost)
+        # Датчик настроен на непрерывные измерения с высокой частотой (например, 100 Гц или 200 Гц).
+        # Микроконтроллер (ваша плата) не успел прочитать предыдущее измерение из регистров датчика.
+        # Датчик сделал новое измерение и перезаписал старые данные в своих регистрах.
         dor_str = "YES (Lost)" if status.DataNotRead else "No"
         print(f"Status Flags    : DRDY: {drdy_str:<7} | OVL: {ovl_str:<9} | DOR: {dor_str}")
     except Exception as e:
