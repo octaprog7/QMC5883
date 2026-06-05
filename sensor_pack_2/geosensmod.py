@@ -1,5 +1,7 @@
 """Типы и вспомогательный код для интегральных магнитометров.
 Магнитометры выдают значения в собственной трехмерной декартовой системе координат (x, y, z)."""
+import json
+import micropython
 from micropython import const
 from collections import namedtuple
 
@@ -48,6 +50,19 @@ def axis_index_to_reg_addr(axis_index: int, offset: int, multiplier: int) -> int
     check_axis_index(axis_index)
     return offset + multiplier * (axis_index >> 1)
 
+@micropython.native
+def _get_min_max(value: float, current_min: float, current_max: float) -> tuple:
+    """Возвращает экстремумы value в виде кортежа (current_min, current_max)."""
+    if value < current_min:
+        current_min = value
+    elif value > current_max:
+        current_max = value
+    return current_min, current_max
+
+@micropython.native
+def _arith_mean(value_a: float, value_b: float) -> float:
+    """Возвращает среднее арифметическое value_a и value_b."""
+    return 0.5 * (value_a + value_b)
 
 class HardIronCalibrator:
     """
@@ -72,31 +87,32 @@ class HardIronCalibrator:
         self.offset_x = 0.0
         self.offset_y = 0.0
         self.offset_z = 0.0
+        # защита от математической ошибки nan (Not a Number — не число),
+        # если пользователь или вызывающий код случайно вызовет метод calculate_offsets()
+        self._has_data = False
 
     def update(self, data: MagnetometerData):
         """
         Обновляет минимальные и максимальные значения на основе объекта MagnetometerData.
         Вызывай этот метод в цикле, пока вращаешь датчик "восьмеркой".
         """
-        x, y, z = data.x, data.y, data.z
-
-        if x < self.min_x: self.min_x = x
-        if x > self.max_x: self.max_x = x
-
-        if y < self.min_y: self.min_y = y
-        if y > self.max_y: self.max_y = y
-
-        if z < self.min_z: self.min_z = z
-        if z > self.max_z: self.max_z = z
+        self._has_data = True
+        #
+        self.min_x, self.max_x = _get_min_max(data.x, self.min_x, self.max_x)
+        self.min_y, self.max_y = _get_min_max(data.y, self.min_y, self.max_y)
+        self.min_z, self.max_z = _get_min_max(data.z, self.min_z, self.max_z)
 
     def calculate_offsets(self) -> tuple:
         """
         Вычисляет вектор смещений (3 float).
         Вызывай этот метод ПОСЛЕ того, как собрал достаточно данных.
         """
-        self.offset_x = 0.5 * (self.max_x + self.min_x)
-        self.offset_y = 0.5 * (self.max_y + self.min_y)
-        self.offset_z = 0.5 * (self.max_z + self.min_z)
+        if not self._has_data:
+            return 0.0, 0.0, 0.0
+
+        self.offset_x = _arith_mean(self.max_x, self.min_x)
+        self.offset_y = _arith_mean(self.max_y, self.min_y)
+        self.offset_z = _arith_mean(self.max_z, self.min_z)
         self._is_calibrated = True
 
         return self.offset_x, self.offset_y, self.offset_z
@@ -119,3 +135,28 @@ class HardIronCalibrator:
 
     def is_calibrated(self) -> bool:
         return self._is_calibrated
+
+
+def save_calibration(offsets: tuple, filename: str = "mag_calib.json") -> bool:
+    """Сохраняет кортеж смещений (offset_x, offset_y, offset_z) в файл JSON.
+    Возвращает True в случае успеха."""
+    try:
+        with open(filename, "w") as f:
+            json.dump(offsets, f)
+        return True
+    except (OSError, IndexError):
+        return False
+
+def load_calibration(filename: str = "mag_calib.json") -> tuple or None:
+    """Загружает смещения из JSON файла.
+    Возвращает кортеж (offset_x, offset_y, offset_z) или None, если файл поврежден/отсутствует."""
+    try:
+        with open(filename, "r") as f:
+            data = json.load(f)  # Считает список Python
+
+        # проверяю, что массив имеет нужную длину
+        if isinstance(data, list) and len(data) == 3:
+            return data[0], data[1], data[2]
+        return None
+    except (OSError, ValueError):
+        return None
