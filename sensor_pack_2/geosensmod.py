@@ -1,5 +1,6 @@
 """Типы и вспомогательный код для интегральных магнитометров.
 Магнитометры выдают значения в собственной трехмерной декартовой системе координат (x, y, z)."""
+import math
 import json
 import micropython
 from micropython import const
@@ -22,6 +23,30 @@ class MagRange:
     G2 = const(0)   # ±2 G (высокая точность, QMC5883L)
     G8 = const(1)   # ±8 G (стандарт, QMC5883L, RM3100)
     G30 = const(2)  # ±30 G (широкий диапазон, MMC5603NJ)
+
+class UpdateRates:
+    """Унифицированные индексы частоты обновления данных (ODR) для магнитометров.
+    Конкретный драйвер транслирует этот индекс в ближайший поддерживаемый
+    аппаратный режим данного чипа."""
+    HZ_10 = const(0)    # 10 Гц; компас, минимум шума
+    HZ_50 = const(1)    # 50 Гц; для робототехники
+    HZ_100 = const(2)   # 100 Гц; для динамичных систем
+    HZ_200 = const(3)   # 200 Гц; высокая скорость для QMC/MMC, ~150-300 Гц для RM3100
+    HZ_500 = const(4)   # 500 Гц; только для MMC5603 и RM3100, QMC выдаст ошибку или максимум
+    HZ_1000 = const(5)  # 1000 Гц; только для MMC5603 в спец. режиме, RM3100 выдаст максимум
+
+class OversampleLevels:
+    """Уровни компромисса "Точность vs Скорость" для магнитометров.
+    Расширенный набор для поддержки высоких разрешений RM3100 и MMC5603NJ.
+    ГЛАВНОЕ(!):
+    - Чем выше уровень точности, тем ниже максимальная частота опроса (ODR) и выше время измерения.
+    - Чем выше уровень скорости, тем выше шум и ниже разрешение."""
+    ULTRA_HIGH = const(0)    # Макс. точность, мин. шум (QMC: 512, MMC: BW=00, RM3100: CC=400)
+    HIGH = const(1)          # Высокая точность (QMC: 256, MMC: BW=01, RM3100: CC=200)
+    MEDIUM_HIGH = const(2)   # Выше среднего (QMC: 128, MMC: BW=10, RM3100: CC=150)
+    BALANCED = const(3)      # Сбалансированный режим (QMC: 128/64, MMC: BW=10, RM3100: CC=100)
+    MEDIUM_LOW = const(4)    # Приоритет скорости (QMC: 64, MMC: BW=11, RM3100: CC=75)
+    HIGH_SPEED = const(5)    # Макс. скорость опроса, высокий шум (QMC: 64, MMC: BW=11+hpower, RM3100: CC=30-50)
 
 def _axis_name_to_int(axis_name: str) -> int:
     """Преобразует имя оси ('x', 'y', 'z', 'X', 'Y', 'Z') в битовую маску оси: 1(X), 2(Y), 4(Z)"""
@@ -160,3 +185,56 @@ def load_calibration(filename: str = "mag_calib.json") -> tuple or None:
         return None
     except (OSError, ValueError):
         return None
+
+
+def tilt_compensate(x: float, y: float, z: float, pitch_rad: float = 0.0, roll_rad: float = 0.0) -> tuple:
+    """
+    Компенсирует наклон датчика для корректного расчета азимута.
+
+    :param x: Откалиброванное значение магнитного поля по оси X (G)
+    :param y: Откалиброванное значение магнитного поля по оси Y (G)
+    :param z: Откалиброванное значение магнитного поля по оси Z (G)
+    :param pitch_rad: Угол тангажа (наклон вперед/назад) в радианах. По умолчанию 0.0.
+    :param roll_rad: Угол крена (наклон влево/вправо) в радианах. По умолчанию 0.0.
+    :return: Кортеж (x_comp, y_comp) - компенсированные значения для расчета азимута.
+    """
+    cos_pitch = math.cos(pitch_rad)
+    sin_pitch = math.sin(pitch_rad)
+    cos_roll = math.cos(roll_rad)
+    sin_roll = math.sin(roll_rad)
+
+    # Матрица поворота для компенсации наклона
+    x_comp = x * cos_pitch + z * sin_pitch
+    y_comp = x * sin_roll * sin_pitch + y * cos_roll - z * sin_roll * cos_pitch
+
+    return x_comp, y_comp
+
+def _normalize_angle(angle: float) -> float:
+    """возвращает нормализованное в диапазон 0 - 360 значение угла."""
+    # Нормализация в диапазон 0 - 360
+    return angle % 360.0
+
+def get_magnetic_heading(x: float, y: float) -> float:
+    """Возвращает магнитный азимут (Magnetic Heading) в градусах (0.0 - 360.0).
+    :param x: Компенсированное значение магнитного поля по оси X (G)
+    :param y: Компенсированное значение магнитного поля по оси Y (G)
+    :return: Азимут в градусах. 0° - Север, 90° - Восток, 180° - Юг, 270° - Запад."""
+    # atan2 возвращает угол в радианах от -pi до pi
+    heading_rad = math.atan2(y, x)
+
+    # Перевод в градусы
+    heading_deg = math.degrees(heading_rad)
+
+    # Нормализация в диапазон 0 - 360
+    return _normalize_angle(heading_deg)
+
+
+def get_true_heading(magnetic_heading: float, declination: float = 0.0) -> float:
+    """Возвращает истинный азимут с учетом магнитного склонения.
+
+    :param magnetic_heading: Магнитный азимут (0-360)
+    :param declination: Магнитное склонение для вашей местности (в градусах). По умолчанию 0.0.
+    :return: Истинный азимут (0-360)"""
+    true_heading = magnetic_heading + declination
+    # Нормализация в диапазон 0 - 360 и возврат значения
+    return _normalize_angle(true_heading)
