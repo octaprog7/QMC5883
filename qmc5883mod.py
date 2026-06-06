@@ -4,8 +4,43 @@ from collections import namedtuple
 
 from sensor_pack_2.geosensmod import AXIS_ALL, MagRange
 from sensor_pack_2.bus_service import I2cAdapter
-from sensor_pack_2.geosensmod import MagnetometerData, axis_index_to_reg_addr, check_axis_index
+from sensor_pack_2.geosensmod import (MagnetometerData, UpdateRates, OversampleLevels, PerformanceProfile,
+                                      IMagnetometer, axis_index_to_reg_addr, check_axis_index)
 from sensor_pack_2.base_sensor import IBaseSensorEx, Iterator, IDentifier, DeviceEx, check_value
+
+# КОРТЕЖ КОРТЕЖЕЙ!
+# Карта профилей производительности для QMC5883L.
+# Индексы (0-4) строго соответствуют значениям в классе PerformanceProfiles.
+_PROFILE_MAP = (
+    # 0: HIGH_ACCURACY/ВЫСОКАЯ_ТОЧНОСТЬ (10 Гц + Макс. усреднение)
+    # ДЛЯ ЧЕГО: Стационарный компас, геодезия, устройство лежит на столе.
+    # ДАТЧИК работает медленно, но очень тщательно фильтрует шум.
+    # Показания максимально стабильные, стрелка компаса не "дрожит".
+    PerformanceProfile(UpdateRates.HZ_10, OversampleLevels.ULTRA_HIGH),
+    # 1: BACKGROUND_MONITORING/ФОНОВЫЙ_МОНИТОРИНГ (10 Гц + Мин. усреднение)
+    # ДЛЯ ЧЕГО: Устройства на батарейке, которые должны работать месяцами.
+    # ДАТЧИК просыпается редко и не тратит энергию на сложные вычисления.
+    # Точность ниже, но для простого определения "север-юг" этого достаточно.
+    PerformanceProfile(UpdateRates.HZ_10, OversampleLevels.MEDIUM_LOW),
+    # 2: DYNAMIC_NAVIGATION/ДИНАМИЧЕСКАЯ_НАВИГАЦИЯ (50 Гц + Баланс)
+    # ДЛЯ ЧЕГО: Роботы, машинки на радиоуправлении, пешая навигация.
+    # ДАТЧИК находит золотую середину: успевает реагировать на повороты,
+    # но при этом сигнал остается достаточно чистым и без сильных скачков.
+    PerformanceProfile(UpdateRates.HZ_50, OversampleLevels.BALANCED),
+    # 3: TILT_COMPENSATION (100 Гц + Баланс)
+    # ДЛЯ ЧЕГО: Работа в паре с акселерометром или гироскопом (фильтры Калмана, Маджвика).
+    # ДАТЧИК выдает данные с идеальной для математических фильтров частотой.
+    # Это стандарт индустрии для расчета 3D-азимута с компенсацией наклона.
+    PerformanceProfile(UpdateRates.HZ_100, OversampleLevels.BALANCED),
+
+    # 4: БЫСТРЫЙ_ОТКЛИК (200 Гц + Макс. скорость)
+    # ДЛЯ ЧЕГО: Простые следящие механизмы или детектирование резких событий.
+    # ВНИМАНИЕ: На этой частоте MicroPython может не успевать выполнять сложную
+    # математику (например, фильтры Калмана) в реальном времени. Используйте
+    # этот режим для сбора "сырых" данных или простых пороговых реакций.
+    PerformanceProfile(UpdateRates.HZ_200, OversampleLevels.HIGH_SPEED)
+)
+
 
 # КОНСТАНТЫ ПЕРЕВОДА (LSB -> Гаусс)
 # Вычислены как: 1.0 / Чувствительность (из Таблицы 2 даташита)
@@ -54,7 +89,7 @@ def _get_val(raw_val: int, is_8g: bool, raw_out: bool = True) -> int | float:
         return raw_val
     return _raw_int_to_gauss(raw_val, is_8g)
 
-class QMC5883L(IBaseSensorEx, IDentifier, Iterator):
+class QMC5883L(IBaseSensorEx, IMagnetometer, IDentifier, Iterator):
     """QMC5883L or HMC5883L Geomagnetic Sensor."""
 
     def __init__(self, adapter: I2cAdapter, address: int = 0x0D):
@@ -63,75 +98,118 @@ class QMC5883L(IBaseSensorEx, IDentifier, Iterator):
         self._buf_2 = bytearray(2)  # для хранения
         self._buf_6 = bytearray(6)  # для хранения
         #
-        self._update_rate = 0
+        self._update_rate_index = UpdateRates.HZ_10
         self._continuous_mode = False
-        self._full_scale = False    # True - 8 Gauss, False - 2 Gauss
-        self._over_sample = 3
+        # диапазон напряженности магнитного поля на который1 настроен датчик
+        self._magnitude_range_index = MagRange.G2
+        self._over_sample_index = OversampleLevels.ULTRA_HIGH
         # если Истина, то get_measurement_value возвращает результат в безразмерных (сырых значениях)
-        # если Ложь, то get_measurement_value возвращает результат в Гаусс!
+        # если Ложь, то get_measurement_value возвращает результат в Гауссах!
         self._raw_mode = False
         #
         self.setup()
         self.refresh_config()
 
-    def set_raw_mode(self, value: bool):
+    def set_raw_mode(self, value: bool | None = None) -> bool:
         """Устанавливает тип значения, возвращаемого методом get_measurement_value.
         Если value Истина, то get_measurement_value возвращает сырые безразмерные значения.
         Если value Ложь, то get_measurement_value возвращает значения в Гаусс.
-        Значение используется методом start_measurement!"""
+        Значение используется методом start_measurement!
+        Возвращает текущее значение типа значения, возвращаемого методом get_measurement_value.
+        """
+        if value is None:
+            return self._raw_mode
         self._raw_mode = value
+        return value
 
-    def is_raw_mode(self) -> bool:
-        """Возвращает тип значения, возвращаемого методом get_measurement_value.
-        Если Истина, то метод get_measurement_value возвращает сырые безразмерные значения.
-        Иначе, метод get_measurement_value возвращает значения в Гаусс."""
-        return self._raw_mode
+    def set_update_rate_index(self, index: int | None = None) -> int:
+        """
+        Устанавливает или возвращает частоту обновления данных (ODR).
 
-    def set_update_rate(self, index: int):
-        """Устанавливает частоту обновления данных (ODR) датчиком.
-        0 - 10 Гц, 1 - 20 Гц, 2 - 100 Гц, 3 - 200 Гц.
-        Значение используется методом start_measurement!"""
-        check_value(index, range(4), f"Invalid update rate: {index}")
-        self._update_rate = index
+        :param index: Значение из UpdateRates (HZ_10, HZ_50, HZ_100, HZ_200)
+                      или целое число (0, 1, 2, 3). Если None, возвращает текущее значение.
+        :return: Текущее значение частоты (int).
+        """
+        if index is None:
+            return self._update_rate_index
 
-    def get_update_rate(self) -> int:
-        return self._update_rate
+        # поддерживаемые частоты для QMC5883L.
+        # работает и с UpdateRates.HZ_10, и с int числом 0
+        allowed_rates = (
+            UpdateRates.HZ_10,
+            UpdateRates.HZ_50,
+            UpdateRates.HZ_100,
+            UpdateRates.HZ_200
+        )
 
-    def set_continuous_mode(self, continuous: bool):
+        if index not in allowed_rates:
+            raise ValueError(f"Поддерживает только частоты 10, 50, 100 или 200 Гц. Получено недопустимое значение: {index}.")
+
+        self._update_rate_index = index
+        return index
+
+    def set_continuous_mode(self, value: bool | None = None) -> bool:
         """Устанавливает режим измерений.
         Значение используется методом start_measurement."""
-        self._continuous_mode = continuous
+        if value is None:
+            return self._continuous_mode
+        self._continuous_mode = value
+        return value
 
-    def set_magnitude_range_index(self, range_idx: int) -> None:
+    def set_magnitude_range_index(self, range_idx: int | None = None) -> int:
         """Устанавливает диапазон измерения напряженности магнитного поля по индексу.
         :param range_idx: MagRange.G2 (0) или MagRange.G8 (1)"""
-        if range_idx == MagRange.G2:
-            self._full_scale = False  # Режим ±2 Gauss
-        elif range_idx == MagRange.G8:
-            self._full_scale = True  # Режим ±8 Gauss
-        else:
+        if range_idx is None:
+            return self._magnitude_range_index
+        if range_idx != MagRange.G2 and range_idx != MagRange.G8:
             raise ValueError(f"QMC5883L не поддерживает индекс {range_idx}!")
+        self._magnitude_range_index = range_idx
+        return range_idx
 
-    def get_magnitude_range_index(self) -> int:
-        """Возвращает индекс измеряемого диапазон напряженности магнитного поля."""
-        if self._full_scale:
-            return MagRange.G8
-        return MagRange.G2
+    def set_oversample_index(self, index: int | None = None) -> int:
+        """Устанавливает или возвращает индекс уровня передискретизации (OSR).
+        QMC5883L поддерживает только 4 аппаратных уровня (0, 1, 2, 3)."""
+        if index is None:
+            return self._over_sample_index
+        # Масштабирование: Если передан индекс 4 или 5 (например, HIGH_SPEED),
+        # функция min() ограничит его значением 3 (максимум для QMC).
+        # Если передан в диапазоне от 0 до 3, он останется без изменений.
+        osi = max(0, min(index, 3))
+        self._over_sample_index = osi
+        return osi
 
-    def is_full_scale(self) -> bool:
-        """"""
-        return self._full_scale
+    def set_performance_profile(self, profile: int | PerformanceProfile | None = None) -> PerformanceProfile:
+        """
+        Устанавливает профиль производительности (ODR + OSR).
+        """
+        if profile is None:
+            return PerformanceProfile(
+                update_rate=self.set_update_rate_index(),
+                oversample=self.set_oversample_index()
+            )
 
-    def set_oversample_rate(self, index: int):
-        """Устанавливает oversample ratio (OSR) датчиком.
-        0 - 512, 1 - 256 Гц, 2 - 128 Гц, 3 - 64 Гц.
-        Значение используется методом start_measurement!"""
-        check_value(index, range(4), f"Invalid oversample ratio: {index}")
-        self._over_sample = index
+        if isinstance(profile, int):
+            # Строгая проверка границ кортежа вместо поиска по ключам словаря
+            if not (0 <= profile < len(_PROFILE_MAP)):
+                raise ValueError(f"Неизвестный профиль производительности: {profile}")
 
-    def get_oversample_rate(self) -> int:
-        """"""
-        return self._over_sample
+            # Мгновенное получение по индексу
+            target_profile = _PROFILE_MAP[profile]
+
+        elif isinstance(profile, PerformanceProfile):
+            target_profile = profile
+
+        else:
+            raise TypeError("profile должен быть int (PerformanceProfiles) или PerformanceProfile")
+
+        # Применяем настройки (валидация и clamping сработают внутри set_ методов)
+        self.set_update_rate_index(target_profile.update_rate)
+        self.set_oversample_index(target_profile.oversample)
+
+        return PerformanceProfile(
+            update_rate=self.set_update_rate_index(),
+            oversample=self.set_oversample_index()
+        )
 
     def _get_ctrl_1(self) -> int:
         """возвращает содержимое первого(!) регистра управления"""
@@ -169,9 +247,9 @@ class QMC5883L(IBaseSensorEx, IDentifier, Iterator):
         """Возвращает Истина, когда включен режим периодических измерений!"""
         return 0 != (0x01 & self._get_ctrl_1())
 
-    def is_standby_mode(self) -> bool:
-        """Возвращает Истина, когда включен режим ожидания(экономичный режим)!"""
-        return 0 == (0x01 & self._get_ctrl_1())
+#    def is_standby_mode(self) -> bool:
+#        """Возвращает Истина, когда включен режим ожидания(экономичный режим)!"""
+#        return 0 == (0x01 & self._get_ctrl_1())
 
     def get_data_status(self, raw: bool = False) -> int | tuple:
         """Возвращает кортеж битов(номер бита): Data Skip (DOR) (2), Overflow flag (OVL) (1), Data Ready (0)"""
@@ -183,7 +261,7 @@ class QMC5883L(IBaseSensorEx, IDentifier, Iterator):
 
     def is_data_ready(self) -> bool:
         """Возвращает флаг Data Ready (DRDY)"""
-        return self.get_data_status(raw=False)[2]
+        return self.get_data_status(raw=False).DRDY
 
     def start_measurement(self):
         """Запускает периодические измерения (continuous_mode is True) или переводит датчик в
@@ -192,10 +270,11 @@ class QMC5883L(IBaseSensorEx, IDentifier, Iterator):
         full_scale: False-2 Gauss; True-8 Gauss;            Field ranges of the magnetic sensor!
         over_sample_ratio: 0-512; 1-256; 2-128; 3-64.       Larger OSR value leads to smaller filter bandwidth,
                                                             less in-band noise and higher power consumption."""
-        osr = self._over_sample
-        check_value(self._update_rate, range(4), f"Invalid update rate: {self._update_rate}")
+        osr = self._over_sample_index
+        full_scale = MagRange.G8 == self.set_magnitude_range_index()
+        check_value(self._update_rate_index, range(4), f"Invalid update rate: {self._update_rate_index}")
         check_value(osr, range(4), f"Invalid over sample ratio: {osr}")
-        ctrl_reg1_val = (osr << 6) | (int(self._full_scale) << 4) | (self._update_rate << 2) | int(self._continuous_mode)
+        ctrl_reg1_val = (osr << 6) | (int(full_scale) << 4) | (self._update_rate_index << 2) | int(self._continuous_mode)
 
         conn = self._connection
         conn.write_reg(reg_addr=_ADDR_CTRL_1_REG, value=ctrl_reg1_val, bytes_count=1)
@@ -235,8 +314,8 @@ class QMC5883L(IBaseSensorEx, IDentifier, Iterator):
               установленного методом `set_raw_mode()`.
             - Коэффициент пересчета в Гауссы зависит от диапазона, заданного методом `set_full_scale()`.
         """
-        raw_mode = self.is_raw_mode()
-        fsr = self.is_full_scale()
+        raw_mode = self.set_raw_mode()
+        fsr = MagRange.G8 == self.set_magnitude_range_index()
         if AXIS_ALL != value_index:
             # запрос значения по одной оси
             raw_val = self._get_single_axis_raw(value_index)
@@ -256,7 +335,7 @@ class QMC5883L(IBaseSensorEx, IDentifier, Iterator):
         Для режима периодических измерений, устанавливает частоту обновления значений величины магнитного поля
         update_rate должно быть в диапазоне от 0 до 3 включительно, что соответствует частотам:
         0 - 10 Hz; 1 - 50 Hz; 2 - 150 Hz; 2 - 100 Hz; 3 - 200 Hz"""
-        upd_rate = self._update_rate
+        upd_rate = self._update_rate_index
         check_value(upd_rate, range(4), f"Invalid update rate: {upd_rate}")
         return _dly_ms[upd_rate]
 
@@ -284,17 +363,17 @@ class QMC5883L(IBaseSensorEx, IDentifier, Iterator):
 
         # OSR (Over Sample Ratio) - биты 7 и 6
         # 00=512(0), 01=256(1), 10=128(2), 11=64(3)
-        self._over_sample = (ctrl_1 >> 6) & 0x03
+        self._over_sample_index = (ctrl_1 >> 6) & 0x03
 
         # RNG (Full Scale Range) - биты 5 и 4
         # 00=2G, 01=8G. (10 и 11 зарезервированы)
         # Если значение равно 1 (0b01), значит включен диапазон 8G (True)
         rng_val = (ctrl_1 >> 4) & 0x03
-        self._full_scale = (1 == rng_val)
+        self.set_magnitude_range_index(MagRange.G8 if rng_val == 0b01 else MagRange.G2)
 
         # ODR (Output Data Rate) - биты 3 и 2
         # 00=10Hz(0), 01=50Hz(1), 10=100Hz(2), 11=200Hz(3)
-        self._update_rate = (ctrl_1 >> 2) & 0x03
+        self._update_rate_index = (ctrl_1 >> 2) & 0x03
 
         # MODE - биты 1 и 0
         # 00=Standby, 01=Continuous. (10 и 11 зарезервированы)
