@@ -1,6 +1,6 @@
 {
   "name": "qmc5883",
-  "version": "1.0.1",
+  "version": "1.1.0",
   "description": "MicroPython driver for QMC5883L geomagnetic sensor with Hard Iron calibration support.",
   "license": "MIT",
   "author": "octaprog7",
