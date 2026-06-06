@@ -9,7 +9,7 @@ from machine import I2C, Pin
 from micropython import const
 
 from qmc5883mod import QMC5883L
-from sensor_pack_2.geosensmod import HardIronCalibrator, MagRange
+from sensor_pack_2.geosensmod import HardIronCalibrator, MagRange, UpdateRates, OversampleLevels, PerformanceProfiles
 from sensor_pack_2.bus_service import I2cAdapter
 
 I2C_ID = const(1)
@@ -98,21 +98,21 @@ def show_mode(sen: QMC5883L):
     print(f"Measurement Mode: {mode_str}")
 
     # Формат возвращаемых данных
-    format_str = "Raw (LSB)" if sen.is_raw_mode() else "Gauss (Гауссы)"
+    format_str = "Raw (LSB)" if True == sen.set_raw_mode() else "Gauss (Гауссы)"
     print(f"Data Format     : {format_str}")
 
     # Частота обновления (ODR)
     odr_map = {0: "10 Hz", 1: "50 Hz", 2: "100 Hz", 3: "200 Hz"}
-    odr_val = odr_map.get(sen.get_update_rate(), "Unknown")
+    odr_val = odr_map.get(sen.set_update_rate_index(), "Unknown")
     print(f"Update Rate     : {odr_val}")
 
     # Диапазон измерений (Full Scale)
-    fs_str = "8 Gauss" if sen.is_full_scale() else "2 Gauss"
+    fs_str = "8 Gauss" if MagRange.G8==sen.set_magnitude_range_index() else "2 Gauss"
     print(f"Full Scale      : {fs_str}")
 
     # Передискретизация (Oversample Ratio)
     osr_map = {0: "512", 1: "256", 2: "128", 3: "64"}
-    osr_val = osr_map.get(sen.get_oversample_rate(), "Unknown")
+    osr_val = osr_map.get(sen.set_oversample_index(), "Unknown")
     print(f"Oversample (OSR): {osr_val}")
 
     print("-" * width)
@@ -122,7 +122,7 @@ def show_mode(sen: QMC5883L):
         status = sen.get_data_status(raw=False)
         drdy_str = "Ready" if status.DRDY else "Waiting"
         ovl_str = "YES (Error)" if status.OVL else "No"
-        # Если DOR в Истина, это значит: ты пропустил одно или несколько измерений, старые данные потеряны (Lost)
+        # Если DOR Истина, это значит: ты пропустил одно или несколько измерений, старые данные потеряны (Lost)
         # Датчик настроен на непрерывные измерения с высокой частотой (например, 100 Гц или 200 Гц).
         # Микроконтроллер (ваша плата) не успел прочитать предыдущее измерение из регистров датчика.
         # Датчик сделал новое измерение и перезаписал старые данные в своих регистрах.
@@ -151,18 +151,20 @@ if __name__ == '__main__':
     sensor = QMC5883L(adapter)
     print(f"Sensor id: {sensor.get_id()}")
     print(16 * "_")
-    show_mode(sensor)
 
     # =====================================================================
     # ИНТЕРАКТИВНЫЙ ЗАПРОС НА КАЛИБРОВКУ.
     # Настраиваю датчик в стабильный режим для сбора данных калибровки.
     # =====================================================================
     sensor.set_magnitude_range_index(MagRange.G2)  # Для калибровки лучше использовать 2 Гаусса (выше разрешение)
-    sensor.set_update_rate(2)     # 100 Hz
-    sensor.set_oversample_rate(1) # OSR 256
+#    sensor.set_update_rate_index(UpdateRates.HZ_100)     # 100 Hz для калибровки!
+#    sensor.set_oversample_index(OversampleLevels.MEDIUM_LOW) # для калибровки!
+    sensor.set_performance_profile(PerformanceProfiles.TILT_COMPENSATION)
     sensor.set_continuous_mode(True)
     sensor.set_raw_mode(False)    # данные сразу в Гауссах
     sensor.start_measurement()
+    # отображение текущего режима датчика
+    show_mode(sensor)
 
     if not calibration_on:
         print("Калибровка пропущена. Используются нулевые смещения.")
@@ -170,15 +172,15 @@ if __name__ == '__main__':
     else:
         clbr = run_calibration(sensor)
         show_calibration_offsets(clbr)
-    # =====================================================================
 
     # --- БЛОК 1: Измерения в диапазоне 2 Гаусса ---
     sensor.set_magnitude_range_index(MagRange.G2)  # Диапазон 2 Гаусса
-    sensor.set_update_rate(2)     # ODR 100 Hz
-    sensor.set_oversample_rate(1) # OSR 256
+#    sensor.set_update_rate_index(UpdateRates.HZ_10)     # ODR 10 Hz
+#    sensor.set_oversample_index(OversampleLevels.HIGH) # OSR 256
+    sensor.set_performance_profile(PerformanceProfiles.HIGH_ACCURACY)
     sensor.set_continuous_mode(True)
     sensor.start_measurement()
-    
+    # отображение текущего режима датчика
     show_mode(sensor)
     wt = sensor.get_conversion_cycle_time()
     delay_func(wt)
@@ -198,18 +200,20 @@ if __name__ == '__main__':
             break
 
     # --- БЛОК 2: Измерения в диапазоне 8 Гаусс ---
-    sensor.set_update_rate(index=3)     # 200 Hz
     sensor.set_magnitude_range_index(MagRange.G8) # 8 Гаусс
-    sensor.set_oversample_rate(index=3) # OSR 64
-    sensor.set_continuous_mode(continuous=True)
+#   sensor.set_update_rate_index(index=UpdateRates.HZ_10)     # 10 Hz
+#   sensor.set_oversample_index(index=OversampleLevels.HIGH) # OSR 64
+    sensor.set_performance_profile(PerformanceProfiles.HIGH_ACCURACY)
+    sensor.set_continuous_mode(value=True)
     sensor.start_measurement()
-    
-    wt = sensor.get_conversion_cycle_time()
+    # отображение текущего режима датчика
     show_mode(sensor)
+    wt = sensor.get_conversion_cycle_time()
     delay_func(wt)
 
     current_temp = sensor.get_temperature()
     print("\n--- Измерения: 8 Gauss Range ---")
+    delay_func(wt * 3)  # жду 3 цикла вместо одного для стабилизации внутренних цепей после смены режима!
     index = 0
     for mf_comp in sensor:
         delay_func(wt)
