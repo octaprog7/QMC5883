@@ -15,25 +15,28 @@ Mag_Axis_Names = ('_', 'x', 'y', '_', 'z')
 AXIS_X = const(1)  # 0b001
 AXIS_Y = const(2)  # 0b010
 AXIS_Z = const(4)  # 0b100
-AXIS_ALL = const(AXIS_X | AXIS_Y | AXIS_Z) # 0b111 = 7
+AXIS_ALL = const(AXIS_X | AXIS_Y | AXIS_Z)  # 0b111 = 7
+
 
 class MagRange:
     """Диапазоны измерений магнитного поля (в Гауссах, G).
     Используется как пространство имен для методов set_range_index."""
-    G2 = const(0)   # ±2 G (высокая точность, QMC5883L)
-    G8 = const(1)   # ±8 G (стандарт, QMC5883L, RM3100)
+    G2 = const(0)  # ±2 G (высокая точность, QMC5883L)
+    G8 = const(1)  # ±8 G (стандарт, QMC5883L, RM3100)
     G30 = const(2)  # ±30 G (широкий диапазон, MMC5603NJ)
+
 
 class UpdateRates:
     """Унифицированные индексы частоты обновления данных (ODR) для магнитометров.
     Конкретный драйвер транслирует этот индекс в ближайший поддерживаемый
     аппаратный режим данного чипа."""
-    HZ_10 = const(0)    # 10 Гц; компас, минимум шума
-    HZ_50 = const(1)    # 50 Гц; для робототехники
-    HZ_100 = const(2)   # 100 Гц; для динамичных систем
-    HZ_200 = const(3)   # 200 Гц; высокая скорость для QMC/MMC, ~150-300 Гц для RM3100
-    HZ_500 = const(4)   # 500 Гц; только для MMC5603 и RM3100, QMC выдаст ошибку или максимум
-    HZ_1000 = const(5)  # 1000 Гц; только для MMC5603 в спец. режиме, RM3100 выдаст максимум
+    HZ_10 = const(0)  # 10 Гц; компас, минимум шума
+    HZ_50 = const(1)  # 50 Гц; для робототехники
+    HZ_100 = const(2)  # 100 Гц; для динамичных систем
+    HZ_200 = const(3)  # 200 Гц; высокая скорость для QMC/MMC, ~150-300 Гц для RM3100
+    HZ_500 = const(4)  # 500 Гц; только для MMC5603 и RM3100, QMC выдаст ошибку или максимум
+    HZ_1000 = const(5)  # 1000 Гц; только для MMC5603. В спец. режиме, RM3100 выдаст максимум
+
 
 class OversampleLevels:
     """Уровни компромисса "Точность vs Скорость" для магнитометров.
@@ -41,12 +44,25 @@ class OversampleLevels:
     ГЛАВНОЕ(!):
     - Чем выше уровень точности, тем ниже максимальная частота опроса (ODR) и выше время измерения.
     - Чем выше уровень скорости, тем выше шум и ниже разрешение."""
-    ULTRA_HIGH = const(0)    # Макс. точность, мин. шум (QMC: 512, MMC: BW=00, RM3100: CC=400)
-    HIGH = const(1)          # Высокая точность (QMC: 256, MMC: BW=01, RM3100: CC=200)
-    MEDIUM_HIGH = const(2)   # Выше среднего (QMC: 128, MMC: BW=10, RM3100: CC=150)
-    BALANCED = const(3)      # Сбалансированный режим (QMC: 128/64, MMC: BW=10, RM3100: CC=100)
-    MEDIUM_LOW = const(4)    # Приоритет скорости (QMC: 64, MMC: BW=11, RM3100: CC=75)
-    HIGH_SPEED = const(5)    # Макс. скорость опроса, высокий шум (QMC: 64, MMC: BW=11+hpower, RM3100: CC=30-50)
+    ULTRA_HIGH = const(0)  # Макс. точность, мин. шум (QMC: 512, MMC: BW=00, RM3100: CC=400)
+    HIGH = const(1)  # Высокая точность (QMC: 256, MMC: BW=01, RM3100: CC=200)
+    MEDIUM_HIGH = const(2)  # Выше среднего (QMC: 128, MMC: BW=10, RM3100: CC=150)
+    BALANCED = const(3)  # Сбалансированный режим (QMC: 128/64, MMC: BW=10, RM3100: CC=100)
+    MEDIUM_LOW = const(4)  # Приоритет скорости (QMC: 64, MMC: BW=11, RM3100: CC=75)
+    HIGH_SPEED = const(5)  # Макс. скорость опроса, высокий шум (QMC: 64, MMC: BW=11+hpower, RM3100: CC=30-50)
+
+
+# Именованный кортеж для понятной передачи настроек производительности
+PerformanceProfile = namedtuple("PerformanceProfile", "update_rate oversample")
+
+class PerformanceProfiles:
+    """Готовые профили производительности (индексы 0-4)."""
+    HIGH_ACCURACY = const(0)           # Стационарный компас
+    BACKGROUND_MONITORING = const(1)   # Экономия энергии
+    DYNAMIC_NAVIGATION = const(2)      # Мобильные роботы, пешая навигация
+    TILT_COMPENSATION = const(3)       # Расчет азимута с акселерометром
+    FAST_RESPONSE = const(4)           # Простые следящие механизмы
+
 
 def _axis_name_to_int(axis_name: str) -> int:
     """Преобразует имя оси ('x', 'y', 'z', 'X', 'Y', 'Z') в битовую маску оси: 1(X), 2(Y), 4(Z)"""
@@ -63,10 +79,12 @@ def check_axis_index(axis_index: int):
     if axis_index not in (AXIS_X, AXIS_Y, AXIS_Z):
         raise ValueError(f"Invalid axis index: {axis_index}")
 
+
 def axis_index_to_name(axis_index: int) -> str:
     """Преобразует битовую маску оси 1(x), 2(y), 4(z) в строку 'x', 'y', 'z'"""
     check_axis_index(axis_index)
     return Mag_Axis_Names[axis_index]
+
 
 def axis_index_to_reg_addr(axis_index: int, offset: int, multiplier: int) -> int:
     """Преобразует битовую маску оси (1, 2, 4) в адрес регистра.
@@ -74,6 +92,7 @@ def axis_index_to_reg_addr(axis_index: int, offset: int, multiplier: int) -> int
     """
     check_axis_index(axis_index)
     return offset + multiplier * (axis_index >> 1)
+
 
 @micropython.native
 def _get_min_max(value: float, current_min: float, current_max: float) -> tuple:
@@ -84,10 +103,12 @@ def _get_min_max(value: float, current_min: float, current_max: float) -> tuple:
         current_max = value
     return current_min, current_max
 
+
 @micropython.native
 def _arith_mean(value_a: float, value_b: float) -> float:
     """Возвращает среднее арифметическое value_a и value_b."""
     return 0.5 * (value_a + value_b)
+
 
 class HardIronCalibrator:
     """
@@ -172,6 +193,7 @@ def save_calibration(offsets: tuple, filename: str = "mag_calib.json") -> bool:
     except (OSError, IndexError):
         return False
 
+
 def load_calibration(filename: str = "mag_calib.json") -> tuple or None:
     """Загружает смещения из JSON файла.
     Возвращает кортеж (offset_x, offset_y, offset_z) или None, если файл поврежден/отсутствует."""
@@ -209,10 +231,12 @@ def tilt_compensate(x: float, y: float, z: float, pitch_rad: float = 0.0, roll_r
 
     return x_comp, y_comp
 
+
 def _normalize_angle(angle: float) -> float:
     """возвращает нормализованное в диапазон 0 - 360 значение угла."""
     # Нормализация в диапазон 0 - 360
     return angle % 360.0
+
 
 def get_magnetic_heading(x: float, y: float) -> float:
     """Возвращает магнитный азимут (Magnetic Heading) в градусах (0.0 - 360.0).
