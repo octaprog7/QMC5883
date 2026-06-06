@@ -262,3 +262,35 @@ def get_true_heading(magnetic_heading: float, declination: float = 0.0) -> float
     true_heading = magnetic_heading + declination
     # Нормализация в диапазон 0 - 360 и возврат значения
     return _normalize_angle(true_heading)
+
+
+class IMagnetometer:
+    """Интерфейс для магнитометров."""
+
+    def set_magnitude_range_index(self, range_idx: int | None = None) -> int:
+        """Устанавливает или возвращает индекс диапазона измерения."""
+        raise NotImplementedError()
+
+    def set_update_rate_index(self, index: int | None = None) -> int:
+        """Устанавливает или возвращает индекс частоты обновления данных (ODR)."""
+        raise NotImplementedError()
+
+    def set_oversample_index(self, index: int | None = None) -> int:
+        """Устанавливает или возвращает индекс уровня передискретизации (OSR)."""
+        raise NotImplementedError()
+
+    def set_performance_profile(self, profile: int | PerformanceProfile | None = None) -> PerformanceProfile:
+        """
+        Устанавливает или возвращает профиль производительности (ODR + OSR).
+        :param profile: Индекс профиля или именованный кортеж PerformanceProfile.
+        :return: Именованный кортеж PerformanceProfile с фактическими значениями.
+        """
+        raise NotImplementedError()
+
+    def set_continuous_mode(self, value: bool | None = None) -> bool:
+        """Устанавливает или возвращает режим непрерывных измерений."""
+        raise NotImplementedError()
+
+    def set_raw_mode(self, value: bool | None = None) -> bool:
+        """Устанавливает или возвращает режим возврата данных (сырые значения или Гауссы)."""
+        raise NotImplementedError()
