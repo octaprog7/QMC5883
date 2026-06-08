@@ -251,7 +251,7 @@ class QMC5883L(IBaseSensorEx, IMagnetometer, IDentifier, Iterator):
 #        """Возвращает Истина, когда включен режим ожидания(экономичный режим)!"""
 #        return 0 == (0x01 & self._get_ctrl_1())
 
-    def get_data_status(self, raw: bool = False) -> int | tuple:
+    def get_data_status(self, raw: bool = False) -> int | DataStatus:
         """Возвращает кортеж битов(номер бита): Data Skip (DOR) (2), Overflow flag (OVL) (1), Data Ready (0)"""
         conn = self._connection
         stat = conn.read_reg(reg_addr=_ADDR_STATUS_FLAGS_REG, bytes_count=1)[0]
