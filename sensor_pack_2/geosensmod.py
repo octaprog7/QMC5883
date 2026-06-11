@@ -6,6 +6,8 @@ import micropython
 from micropython import const
 from collections import namedtuple
 
+from sensor_pack_2.base_sensor import IBaseSensorEx, Iterator
+
 # Магнитометры практически всегда выдают значения в собственной трехмерной декартовой системе координат (x, y, z).
 # Поле is_raw: bool Истина, когда поля кортежа содержат сырые(безразмерные) данные!
 MagnetometerData = namedtuple("MagnetometerData", "x y z is_raw")
@@ -36,6 +38,13 @@ class UpdateRates:
     HZ_200 = const(3)  # 200 Гц; высокая скорость для QMC/MMC, ~150-300 Гц для RM3100
     HZ_500 = const(4)  # 500 Гц; только для MMC5603 и RM3100, QMC выдаст ошибку или максимум
     HZ_1000 = const(5)  # 1000 Гц; только для MMC5603. В спец. режиме, RM3100 выдаст максимум
+    # для HSCDTD008A
+    HZ_0_5 = const(6)
+    HZ_20 = const(7)
+    # для RM3100
+    HZ_1 = const(8)  # 1 Гц; очень низкое энергопотребление
+    HZ_300 = const(9)  # 300 Гц; нативная частота для RM3100
+    HZ_400 = const(10)  # 400 Гц; высокая скорость для RM3100
 
 
 class OversampleLevels:
@@ -294,3 +303,32 @@ class IMagnetometer:
     def set_raw_mode(self, value: bool | None = None) -> bool:
         """Устанавливает или возвращает режим возврата данных (сырые значения или Гауссы)."""
         raise NotImplementedError()
+
+    def is_data_ready(self) -> bool:
+        """Возвращает флаг готовности данных для считывания (data ready). 10.06.2026."""
+        raise NotImplementedError()
+
+    def in_standby_mode(self) -> bool:
+        """Возвращает True, если датчик находится в режиме низкого энергопотребления (Stand-by/Sleep)."""
+        raise NotImplementedError()
+
+    def perform_self_test(self) -> bool | None:
+        """Выполняет аппаратное само тестирование. Если оно прошло успешно, возвращает Истина, иначе Ложь.
+        Если датчик не поддерживает эту возможность, то возвращает None!
+
+        Встроенный Self Test в дешевых MEMS-магнитометрах (включая HSCDTD008A) – это часто больше маркетинговая функция,
+        чем полезный инструмент!"""
+        raise NotImplementedError()
+
+    def get_temperature(self) -> int | float | None:
+        """Возвращает текущую температуру чипа в градусах Цельсия.
+
+        :return: Температура (float), если датчик имеет встроенный термометр.
+                 None, если данная модель датчика физически не имеет
+                 встроенного датчика температуры (например, RM3100)."""
+        raise NotImplementedError()
+
+
+class ICommonMagnitometer(IBaseSensorEx, IMagnetometer, Iterator):
+    """Общий интерфейс всех (или почти всех) магнитометров."""
+    pass
