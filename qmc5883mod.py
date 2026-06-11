@@ -5,8 +5,8 @@ from collections import namedtuple
 from sensor_pack_2.geosensmod import AXIS_ALL, MagRange
 from sensor_pack_2.bus_service import I2cAdapter
 from sensor_pack_2.geosensmod import (MagnetometerData, UpdateRates, OversampleLevels, PerformanceProfile,
-                                      IMagnetometer, axis_index_to_reg_addr, check_axis_index)
-from sensor_pack_2.base_sensor import IBaseSensorEx, Iterator, IDentifier, DeviceEx, check_value
+                                      ICommonMagnitometer, axis_index_to_reg_addr, check_axis_index, PerformanceProfiles)
+from sensor_pack_2.base_sensor import IDentifier, DeviceEx, check_value
 
 # КОРТЕЖ КОРТЕЖЕЙ!
 # Карта профилей производительности для QMC5883L.
@@ -44,10 +44,10 @@ _PROFILE_MAP = (
 
 # КОНСТАНТЫ ПЕРЕВОДА (LSB -> Гаусс)
 # Вычислены как: 1.0 / Чувствительность (из Таблицы 2 даташита)
-_MULTIPLIER_2G = 1.0 / 12000.0  # ~8.333333333333333e-05
-_MULTIPLIER_8G = 1.0 / 3000.0   # ~3.333333333333333e-04
+_MULTIPLIER_2G = const(8.333333e-05)  # ~1.0 / 12000.0
+_MULTIPLIER_8G = const(3.333333333333333e-04)   # 1.0 / 3000.0
 # 1 / ODR [ms]
-_dly_ms = 100, 20, 10, 5
+_dly_ms = const((100, 20, 10, 5))
 #
 _ADDR_STATUS_FLAGS_REG = const(0x06)
 _ADDR_TEMP_REG = const(0x07) # два байта
@@ -89,7 +89,7 @@ def _get_val(raw_val: int, is_8g: bool, raw_out: bool = True) -> int | float:
         return raw_val
     return _raw_int_to_gauss(raw_val, is_8g)
 
-class QMC5883L(IBaseSensorEx, IMagnetometer, IDentifier, Iterator):
+class QMC5883L(ICommonMagnitometer, IDentifier):
     """QMC5883L or HMC5883L Geomagnetic Sensor."""
 
     def __init__(self, adapter: I2cAdapter, address: int = 0x0D):
@@ -103,6 +103,7 @@ class QMC5883L(IBaseSensorEx, IMagnetometer, IDentifier, Iterator):
         # диапазон напряженности магнитного поля на который1 настроен датчик
         self._magnitude_range_index = MagRange.G2
         self._over_sample_index = OversampleLevels.ULTRA_HIGH
+        self._performance_profile = PerformanceProfiles.HIGH_ACCURACY  # Дефолтный профиль
         # если Истина, то get_measurement_value возвращает результат в безразмерных (сырых значениях)
         # если Ложь, то get_measurement_value возвращает результат в Гауссах!
         self._raw_mode = False
@@ -179,9 +180,6 @@ class QMC5883L(IBaseSensorEx, IMagnetometer, IDentifier, Iterator):
         return osi
 
     def set_performance_profile(self, profile: int | PerformanceProfile | None = None) -> PerformanceProfile:
-        """
-        Устанавливает профиль производительности (ODR + OSR).
-        """
         if profile is None:
             return PerformanceProfile(
                 update_rate=self.set_update_rate_index(),
@@ -189,26 +187,25 @@ class QMC5883L(IBaseSensorEx, IMagnetometer, IDentifier, Iterator):
             )
 
         if isinstance(profile, int):
-            # Строгая проверка границ кортежа вместо поиска по ключам словаря
             if not (0 <= profile < len(_PROFILE_MAP)):
                 raise ValueError(f"Неизвестный профиль производительности: {profile}")
-
-            # Мгновенное получение по индексу
             target_profile = _PROFILE_MAP[profile]
+            # Сохраняю индекс профиля
+            self._performance_profile = profile
 
         elif isinstance(profile, PerformanceProfile):
             target_profile = profile
-
+            # Сохраняю кортеж профиля
+            self._performance_profile = profile
         else:
-            raise TypeError("profile должен быть int (PerformanceProfiles) или PerformanceProfile")
+            raise TypeError("profile должен быть int или PerformanceProfile")
 
-        # Применяем настройки (валидация и clamping сработают внутри set_ методов)
         self.set_update_rate_index(target_profile.update_rate)
         self.set_oversample_index(target_profile.oversample)
 
         return PerformanceProfile(
-            update_rate=self.set_update_rate_index(),
-            oversample=self.set_oversample_index()
+            update_rate=self._update_rate_index,
+            oversample=self._over_sample_index
         )
 
     def _get_ctrl_1(self) -> int:
@@ -227,7 +224,7 @@ class QMC5883L(IBaseSensorEx, IMagnetometer, IDentifier, Iterator):
         conn = self._connection
         conn.write_reg(reg_addr=_ADDR_CTRL_2_REG, value=0x80, bytes_count=1)
 
-    def get_temperature(self, offset: float = 0, coefficient: float = 0.01) -> int | float:
+    def get_temperature(self) -> float:
         """Возвращает температуру, измеренную датчиком.
         offset - смещение в градусах Цельсия. Нужно подбирать по эталонному термометру!
         coefficient - коэфф. преобразования сырого значения в градусы Цельсия. Лучше не изменять!
@@ -236,8 +233,9 @@ class QMC5883L(IBaseSensorEx, IMagnetometer, IDentifier, Iterator):
         """
         buf = self._buf_2
         conn = self._connection
+        coefficient = 0.01
         conn.read_buf_from_mem(address=_ADDR_TEMP_REG, buf=buf)  # 16 bit value (int16)
-        return offset + coefficient * conn.unpack(fmt_char="h", source=buf)[0]  # signed short
+        return coefficient * conn.unpack(fmt_char="h", source=buf)[0]  # h - signed short
 
     def is_single_shot_mode(self) -> bool:
         """Датчик не поддерживает этот режим!"""
@@ -247,9 +245,9 @@ class QMC5883L(IBaseSensorEx, IMagnetometer, IDentifier, Iterator):
         """Возвращает Истина, когда включен режим периодических измерений!"""
         return 0 != (0x01 & self._get_ctrl_1())
 
-#    def is_standby_mode(self) -> bool:
-#        """Возвращает Истина, когда включен режим ожидания(экономичный режим)!"""
-#        return 0 == (0x01 & self._get_ctrl_1())
+    def in_standby_mode(self) -> bool:
+        """Возвращает Истина, когда включен режим ожидания(экономичный режим)!"""
+        return 0 == (0x01 & self._get_ctrl_1())
 
     def get_data_status(self, raw: bool = False) -> int | DataStatus:
         """Возвращает кортеж битов(номер бита): Data Skip (DOR) (2), Overflow flag (OVL) (1), Data Ready (0)"""
@@ -314,7 +312,7 @@ class QMC5883L(IBaseSensorEx, IMagnetometer, IDentifier, Iterator):
               установленного методом `set_raw_mode()`.
             - Коэффициент пересчета в Гауссы зависит от диапазона, заданного методом `set_full_scale()`.
         """
-        raw_mode = self.set_raw_mode()
+        raw_mode = self._raw_mode
         fsr = MagRange.G8 == self.set_magnitude_range_index()
         if AXIS_ALL != value_index:
             # запрос значения по одной оси
@@ -386,3 +384,9 @@ class QMC5883L(IBaseSensorEx, IMagnetometer, IDentifier, Iterator):
         if self.is_continuously_mode() and self.is_data_ready():
             return self.get_measurement_value(AXIS_ALL)
         return None
+
+    def get_adc_conversion_time(self) -> int:
+        """Возвращает чистое время преобразования АЦП в МИЛЛИСЕКУНДАХ.
+        Для QMC5883L время АЦП совпадает с периодом ODR, так как датчик
+        не имеет отдельного времени простоя между измерениями."""
+        raise NotImplementedError("QMC5883L не поддерживает отдельное время АЦП")
