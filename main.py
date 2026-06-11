@@ -9,7 +9,8 @@ from machine import I2C, Pin
 from micropython import const
 
 from qmc5883mod import QMC5883L
-from sensor_pack_2.geosensmod import HardIronCalibrator, MagRange, UpdateRates, OversampleLevels, PerformanceProfiles
+from sensor_pack_2.geosensmod import (HardIronCalibrator, MagRange, ICommonMagnitometer,
+                                      UpdateRates, OversampleLevels, PerformanceProfiles)
 from sensor_pack_2.bus_service import I2cAdapter
 
 I2C_ID = const(1)
@@ -22,7 +23,7 @@ ITERATIONS = const(33)
 calibration_on: bool = True
 
 
-def run_calibration(sens: QMC5883L, duration_ms=15_000) -> HardIronCalibrator:
+def run_calibration(sens: ICommonMagnitometer, duration_ms=15_000) -> HardIronCalibrator:
     """Проводит процедуру калибровки."""
     width = 60
     print("\n" + "=" * width)
@@ -76,7 +77,7 @@ def show_calibration_offsets(cal: HardIronCalibrator):
         print(" Калибровка не выполнена. Смещения равны 0.0000 G")
     print("=" * width + "\n")
 
-def show_mode(sen: QMC5883L):
+def show_mode(sen: ICommonMagnitometer):
     """
     Выводит текущие настройки и статус датчика QMC5883L в консоль.
     Идеально подходит для отладки и проверки состояния оборудования.
@@ -89,9 +90,9 @@ def show_mode(sen: QMC5883L):
     print("=" * width)
 
     # Идентификация чипа
-    chip_id = sen.get_id()
-    id_status = "OK" if chip_id == 0xFF else f"ERROR (0x{chip_id:02X})"
-    print(f"Chip ID         : 0x{chip_id:02X} ({id_status})")
+#    chip_id = sen.get_id()
+#    id_status = "OK" if chip_id == 0xFF else f"ERROR (0x{chip_id:02X})"
+#    print(f"Chip ID         : 0x{chip_id:02X} ({id_status})")
 
     # Режим измерений
     mode_str = "Continuous (Непрерывный)" if sen.is_continuously_mode() else "Standby (Ожидание)"
@@ -132,11 +133,11 @@ def show_mode(sen: QMC5883L):
         print(f"Status Flags    : Error reading status ({e})")
 
     # Температура
-    try:
-        temp = sen.get_temperature()
-        print(f"Temperature     : {temp:.2f} C (относительная)")
-    except Exception as e:
-        print(f"Temperature     : Error reading ({e})")
+#    try:
+#        temp = sen.get_temperature()
+#        print(f"Temperature     : {temp:.2f} C (относительная)")
+#    except Exception as e:
+#        print(f"Temperature     : Error reading ({e})")
 
     print("=" * width)
 
@@ -183,7 +184,7 @@ if __name__ == '__main__':
     # отображение текущего режима датчика
     show_mode(sensor)
     wt = sensor.get_conversion_cycle_time()
-    delay_func(wt)
+    delay_func(wt // 2)
 
     current_temp = sensor.get_temperature()
     print("\n--- Измерения: 2 Gauss Range ---")
@@ -209,7 +210,7 @@ if __name__ == '__main__':
     # отображение текущего режима датчика
     show_mode(sensor)
     wt = sensor.get_conversion_cycle_time()
-    delay_func(wt)
+    delay_func(wt // 2)
 
     current_temp = sensor.get_temperature()
     print("\n--- Измерения: 8 Gauss Range ---")
