@@ -121,23 +121,17 @@ def show_mode(sen: ICommonMagnitometer):
     # Текущие флаги статуса
     try:
         status = sen.get_data_status(raw=False)
-        drdy_str = "Ready" if status.DRDY else "Waiting"
-        ovl_str = "YES (Error)" if status.OVL else "No"
-        # Если DOR Истина, это значит: ты пропустил одно или несколько измерений, старые данные потеряны (Lost)
+        drdy_str = "Ready" if status.DataReady else "Waiting"
+        # Если Saturated Истина, это значит: сенсор насыщен/перегружен(магнитное поле слишком сильное, превышен диапазон измерений).
+        sat_str = "YES (Overload)" if status.Saturated else "No"
+        # Если DataLost Истина, это значит: пропущено одно или несколько измерений, старые данные потеряны (Lost)
         # Датчик настроен на непрерывные измерения с высокой частотой (например, 100 Гц или 200 Гц).
-        # Микроконтроллер (ваша плата) не успел прочитать предыдущее измерение из регистров датчика.
+        # Микроконтроллер не успел прочитать предыдущее измерение из регистров датчика.
         # Датчик сделал новое измерение и перезаписал старые данные в своих регистрах.
-        dor_str = "YES (Lost)" if status.DataNotRead else "No"
-        print(f"Status Flags    : DRDY: {drdy_str:<7} | OVL: {ovl_str:<9} | DOR: {dor_str}")
+        lost_str = "YES (Lost)" if status.DataLost else "No"
+        print(f"Status Flags    : DataReady: {drdy_str:<7} | Saturated: {sat_str:<11} | DataLost: {lost_str}")
     except Exception as e:
         print(f"Status Flags    : Error reading status ({e})")
-
-    # Температура
-#    try:
-#        temp = sen.get_temperature()
-#        print(f"Temperature     : {temp:.2f} C (относительная)")
-#    except Exception as e:
-#        print(f"Temperature     : Error reading ({e})")
 
     print("=" * width)
 
