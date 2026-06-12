@@ -111,6 +111,33 @@ def all_none(*args):
     return True
 
 
+def bytes_to_int(source: bytes, big_byte_order: bool = True, signed: bool = False) -> int | None:
+    """Универсальная конвертация байт в целое число для датчиков с количеством байт на отсчет 3 или более.
+
+    Параметры:
+        source: массив байт для конвертации
+        big_byte_order: True для Big-Endian (MSB первый), False для Little-Endian
+        signed: True для знаковых чисел (дополнительный код)
+
+    Возвращает:
+        int: конвертированное число
+        None: если передан пустой массив"""
+    if not source:
+        return None
+
+    # сборка беззнакового числа на уровне Си
+    n = int.from_bytes(source, 'big' if big_byte_order else 'little')
+
+    # Коррекция знака
+    if signed:
+        bits = len(source) * 8
+        if n & (1 << (bits - 1)):
+            n -= (1 << bits)
+
+    return n
+
+
+
 class Device:
     """Класс - основа датчика"""
 
