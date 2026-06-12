@@ -20,6 +20,13 @@ AXIS_Z = const(4)  # 0b100
 AXIS_ALL = const(AXIS_X | AXIS_Y | AXIS_Z)  # 0b111 = 7
 
 
+# Универсальный(!) формат статуса для всех(!) магнитометров
+# DataReady: новые данные доступны для чтения
+# Saturated: сенсор насыщен (превышен диапазон измерений)
+# DataLost: данные потеряны (переполнение буфера или ошибка)
+DataStatus = namedtuple("DataStatus", "DataReady Saturated DataLost")
+
+
 class MagRange:
     """Диапазоны измерений магнитного поля (в Гауссах, G).
     Используется как пространство имен для методов set_range_index."""
