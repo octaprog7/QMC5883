@@ -1,10 +1,10 @@
 """MicroPython module for QMC5883L or HMC5883L Geomagnetic Sensor"""
 from micropython import const
-from collections import namedtuple
+# from collections import namedtuple
 
 from sensor_pack_2.geosensmod import AXIS_ALL, MagRange
 from sensor_pack_2.bus_service import I2cAdapter
-from sensor_pack_2.geosensmod import (MagnetometerData, UpdateRates, OversampleLevels, PerformanceProfile,
+from sensor_pack_2.geosensmod import (MagnetometerData, UpdateRates, OversampleLevels, PerformanceProfile, DataStatus,
                                       ICommonMagnitometer, axis_index_to_reg_addr, check_axis_index, PerformanceProfiles)
 from sensor_pack_2.base_sensor import IDentifier, DeviceEx, check_value
 
@@ -64,7 +64,6 @@ _ADDR_ID_REG = const(0x0D)
 # Флаг переполнения (OVL) устанавливается в 1, если какие-либо данные трех каналов магнитного датчика выходят за пределы допустимого диапазона.
 # Выходные данные каждой оси насыщаются в диапазонах -32768 и 32767; если какая-либо из осей выходит за эти пределы,
 # флаг OVL устанавливается в 1. Этот флаг сбрасывается в значение 0, если следующее измерение возвращается в диапазон (-32768, 32767), в противном случае он остается равным 1.
-DataStatus = namedtuple("DataStatus", "DataNotRead OVL DRDY")
 
 
 def _raw_int_to_gauss(raw_val: int, is_8g: bool = True) -> float:
@@ -255,11 +254,11 @@ class QMC5883L(ICommonMagnitometer, IDentifier):
         stat = conn.read_reg(reg_addr=_ADDR_STATUS_FLAGS_REG, bytes_count=1)[0]
         if raw:
             return stat
-        return DataStatus(DataNotRead=0 != (stat & 0x04), OVL=0 != (stat & 0x02), DRDY=0 != (stat & 0x01))
+        return DataStatus(DataLost=0 != (stat & 0x04), Saturated=0 != (stat & 0x02), DataReady=0 != (stat & 0x01))
 
     def is_data_ready(self) -> bool:
         """Возвращает флаг Data Ready (DRDY)"""
-        return self.get_data_status(raw=False).DRDY
+        return self.get_data_status(raw=False).DataReady
 
     def start_measurement(self):
         """Запускает периодические измерения (continuous_mode is True) или переводит датчик в
